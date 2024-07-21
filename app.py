@@ -155,8 +155,9 @@ def find_most_attractive_flies(my_df, method='duration', rich=True, num=3):
     return my_results.iloc[:num].reset_index(drop=True)
 
 # initalize the tables for display
-my_richest_flies = find_most_attractive_flies(df.iloc[-126:], rich=True)
-my_cheapest_flies = find_most_attractive_flies(df.iloc[-126:], rich=False)
+INITIAL_LOOKBACK = 21 * 12 # number of days back to look initially
+my_richest_flies = find_most_attractive_flies(df.iloc[-INITIAL_LOOKBACK:], rich=True)
+my_cheapest_flies = find_most_attractive_flies(df.iloc[-INITIAL_LOOKBACK:], rich=False)
 
 # builds out the html skeleton for the web app
 app.layout = html.Div([
@@ -167,7 +168,7 @@ app.layout = html.Div([
             id='date-picker-range',
             min_date_allowed=df.index[0],
             max_date_allowed=df.index[-1],
-            start_date=df.index[-126],
+            start_date=df.index[-INITIAL_LOOKBACK],
             end_date=df.index[-1]
         ),
         html.Div(id='output-container-date-picker-range')
@@ -189,7 +190,7 @@ app.layout = html.Div([
         html.Div([
             dcc.Dropdown(
                 df.columns,
-                '5y',
+                '2y',
                 id='left_wing'
             )
         ], style={'width': '15%', 'display': 'inline-block'}),
@@ -205,7 +206,7 @@ app.layout = html.Div([
         html.Div([
             dcc.Dropdown(
                 df.columns,
-                '30y',
+                '10y',
                 id='right_wing'
             )
         ], style={'width': '15%', 'display': 'inline-block'}),
@@ -312,7 +313,7 @@ def update_residual_graph(left_wing, belly, right_wing, metric, start_date, end_
     my_range = wtd_fly.max() - wtd_fly.min()
 
     # sets descriptive titles for the charts
-    my_title = 'hedging duration & curve gives us %.1f / 2 / %.1f fly' % (w1, w2)
+    my_title = 'hedging duration & curve gives us %.1f / 2 / %.1f weighted %s_%s_%s fly' % (w1, w2, left_wing, belly, right_wing)
     my_xlabel = 'residual: %.1fbp; vol adjusted residual: %.1fbp; range: %.1fbp' % (resid, vol_adj_resid, my_range)
 
     fig = px.line(x=wtd_fly.index, y=wtd_fly, title=my_title)
