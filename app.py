@@ -19,7 +19,7 @@ def get_wtd_butterfly(my_df, left, belly, right, left_weight=-1, right_weight=-1
     pass in butterfly tenors, ex: 2y
     without speciying weights, assume 1:2:1 weighted butterfly
 
-    return time series of the butterfly
+    return time series of the weighted butterfly
     '''
     scale = 100 if scale else 1  # whether to scale by 100 to convert to bp
     # returns a 1:2:1 fly, in bps, by default
@@ -114,15 +114,19 @@ def get_duration_neutral_butterfly(my_df, left, belly, right, method='duration')
         return
 
 def find_most_attractive_flies(my_df, method='duration', rich=True, num=3):
+    '''
+    returns a table of the richest and cheapest butterflies, using logic from 
+    '''
     benchmark_points = my_df.columns
     if len(benchmark_points) < 3: return # need to have at least 4 points
     
     my_results = []
     all_flies = combinations(benchmark_points, 3)
+    # loop through all combinations of butterflies
     for left, belly, right in all_flies:
         w1, w2 = get_duration_neutral_butterfly(my_df, left, belly, right, method=method)
         wtd_fly = get_wtd_butterfly(my_df, left, belly, right, left_weight=w1, right_weight=w2)
-        # wtd_fly.plot()
+        
         my_fly_name = '%s_%s_%s' % (left, belly, right)
         # calculates various stats on the fly for display
         fly_avg = wtd_fly.mean()
@@ -150,9 +154,11 @@ def find_most_attractive_flies(my_df, method='duration', rich=True, num=3):
     my_results = my_results.sort_values('vol adj resid (bp)', ascending=rich)
     return my_results.iloc[:num].reset_index(drop=True)
 
+# initalize the tables for display
 my_richest_flies = find_most_attractive_flies(df.iloc[-126:], rich=True)
 my_cheapest_flies = find_most_attractive_flies(df.iloc[-126:], rich=False)
 
+# builds out the html skeleton for the web app
 app.layout = html.Div([
     html.H2('Select method of analysis and lookback dates'),
     html.Div([
@@ -178,7 +184,6 @@ app.layout = html.Div([
         ])
     ]),
 
-    # TODO: add html label for left, belly, and right
     html.Div([
         html.H2('Select the legs of the butterfly for a deeper analysis'),
         html.Div([
@@ -215,10 +220,6 @@ app.layout = html.Div([
         ], style={'height': '50%', 'width': '50%', 'display': 'inline-block'}),
         dcc.Graph(id='residual-graph'),
     ]),
-
-    # html.Div([
-    #     dcc.Graph(id='residual-graph'),
-    # ]),
 
 ])
 
@@ -303,7 +304,7 @@ def update_residual_graph(left_wing, belly, right_wing, metric, start_date, end_
     w1, w2 = get_duration_neutral_butterfly(df_select, left_wing, belly, right_wing, method=metric)
     wtd_fly = get_wtd_butterfly(df_select, left_wing, belly, right_wing, left_weight=w1, right_weight=w2)
     
-    # calculates various 
+    # calculates various statistics
     fly_avg = wtd_fly.mean()
     resid = wtd_fly[-1] - fly_avg
     rlzd_vol = wtd_fly.diff().dropna().std()
