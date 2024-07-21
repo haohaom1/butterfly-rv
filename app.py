@@ -1,10 +1,11 @@
-from dash import Dash, dcc, html, Input, Output, callback
+from dash import Dash, dcc, html, Input, Output, callback, dash_table
 import plotly.express as px
 import plotly.graph_objects as go
 import datetime
 import statsmodels.api as sm
 from sklearn.decomposition import PCA
 
+from itertools import combinations
 import pandas as pd
 import numpy as np
 
@@ -112,37 +113,48 @@ def get_duration_neutral_butterfly(my_df, left, belly, right, method='duration')
         # should not reach here
         return
 
-#TODO: loop through all available fly combinations and find the 3 richest and 3 cheapest, sorted by resid / vol
+def find_most_attractive_flies(my_df, method='duration', rich=True, num=3):
+    benchmark_points = my_df.columns
+    if len(benchmark_points) < 3: return # need to have at least 4 points
+    
+    my_results = []
+    all_flies = combinations(benchmark_points, 3)
+    for left, belly, right in all_flies:
+        w1, w2 = get_duration_neutral_butterfly(my_df, left, belly, right, method=method)
+        wtd_fly = get_wtd_butterfly(my_df, left, belly, right, left_weight=w1, right_weight=w2)
+        # wtd_fly.plot()
+        my_fly_name = '%s_%s_%s' % (left, belly, right)
+        # calculates various stats on the fly for display
+        fly_avg = wtd_fly.mean()
+        resid = wtd_fly[-1] - fly_avg
+        rlzd_vol = wtd_fly.diff().dropna().std()
+        vol_adj_resid = resid / rlzd_vol
+        my_range = wtd_fly.max() - wtd_fly.min()
+
+        relevant_stats = {
+            'method': method,
+            'fly name': my_fly_name,
+            'left weight': w1,
+            'belly weight': 2,
+            'right weight': w2,
+            'residual (bp)': resid,
+            'rlzd vol': rlzd_vol,
+            'range (bp)': my_range,
+            'vol adj resid (bp)': vol_adj_resid,
+        }
+        my_results.append(relevant_stats)
+
+    my_results = pd.DataFrame(my_results).round(1)
+
+    # richest fly want the most negative residuals
+    my_results = my_results.sort_values('vol adj resid (bp)', ascending=rich)
+    return my_results.iloc[:num].reset_index(drop=True)
+
+my_richest_flies = find_most_attractive_flies(df.iloc[-126:], rich=True)
+my_cheapest_flies = find_most_attractive_flies(df.iloc[-126:], rich=False)
 
 app.layout = html.Div([
-    # TODO: add html label for left, belly, and right
-    html.Div([
-
-        html.Div([
-            dcc.Dropdown(
-                df.columns,
-                '2y',
-                id='left_wing'
-            )
-        ], style={'width': '33%', 'display': 'inline-block'}),
-
-        html.Div([
-            dcc.Dropdown(
-                df.columns,
-                '3y',
-                id='belly'
-            )
-        ], style={'width': '33%', 'display': 'inline-block'}),
-
-        html.Div([
-            dcc.Dropdown(
-                df.columns,
-                '5y',
-                id='right_wing'
-            )
-        ], style={'width': '33%', 'display': 'inline-block'}),
-    ]),
-
+    html.H2('Select method of analysis and lookback dates'),
     html.Div([
         dcc.RadioItems(['duration', 'pca'], 'duration', id='metric_selector'),
         dcc.DatePickerRange(
@@ -154,6 +166,46 @@ app.layout = html.Div([
         ),
         html.Div(id='output-container-date-picker-range')
     ]),
+
+    html.Div([
+        html.H3('Richest butterflies:'),
+        html.Div([
+            dash_table.DataTable(id='result-table-rich', data=my_richest_flies.to_dict('records'), columns=[{'name': i, 'id': i} for i in my_richest_flies.columns]),
+        ]), 
+        html.H3('Cheapest butterflies:'),
+        html.Div([
+            dash_table.DataTable(id='result-table-cheap', data=my_cheapest_flies.to_dict('records'), columns=[{'name': i, 'id': i} for i in my_cheapest_flies.columns]),
+        ])
+    ]),
+
+    # TODO: add html label for left, belly, and right
+    html.Div([
+        html.H2('Select the legs of the butterfly for a deeper analysis'),
+        html.Div([
+            dcc.Dropdown(
+                df.columns,
+                '5y',
+                id='left_wing'
+            )
+        ], style={'width': '15%', 'display': 'inline-block'}),
+
+        html.Div([
+            dcc.Dropdown(
+                df.columns,
+                '7y',
+                id='belly'
+            )
+        ], style={'width': '15%', 'display': 'inline-block'}),
+
+        html.Div([
+            dcc.Dropdown(
+                df.columns,
+                '30y',
+                id='right_wing'
+            )
+        ], style={'width': '15%', 'display': 'inline-block'}),
+    ]),
+
     html.Div([
         html.Div([
             dcc.Graph(id='regression-graph1'),
@@ -161,14 +213,27 @@ app.layout = html.Div([
         html.Div([
             dcc.Graph(id='regression-graph2'),
         ], style={'height': '50%', 'width': '50%', 'display': 'inline-block'}),
-    ]),
-
-    html.Div([
         dcc.Graph(id='residual-graph'),
     ]),
 
+    # html.Div([
+    #     dcc.Graph(id='residual-graph'),
+    # ]),
+
 ])
 
+@callback(
+    Output('result-table-rich', 'data'),
+    Output('result-table-cheap', 'data'),
+    Input('metric_selector', 'value'),
+    Input('date-picker-range', 'start_date'),
+    Input('date-picker-range', 'end_date'),
+)
+def update_results_table(method, start_date, end_date):
+    df_select = df.loc[start_date:end_date]
+    my_results_rich = find_most_attractive_flies(df_select, method=method, rich=True)
+    my_results_cheap = find_most_attractive_flies(df_select, method=method, rich=False)
+    return my_results_rich.to_dict('records'), my_results_cheap.to_dict('records')
 
 @callback(
     Output('regression-graph1', 'figure'),
@@ -180,7 +245,6 @@ app.layout = html.Div([
     Input('date-picker-range', 'start_date'),
     Input('date-picker-range', 'end_date'),
 )
-# TODO: allow x axis to be 1st PC or 
 def update_regression_graphs(left_wing, belly, right_wing, metric, start_date, end_date):
 
     df_select = df.loc[start_date:end_date]
@@ -224,6 +288,7 @@ def update_regression_graphs(left_wing, belly, right_wing, metric, start_date, e
 
     return fig1, fig2
 
+
 @callback(
     Output('residual-graph', 'figure'),
     Input('left_wing', 'value'),
@@ -237,16 +302,21 @@ def update_residual_graph(left_wing, belly, right_wing, metric, start_date, end_
     df_select = df.loc[start_date:end_date]
     w1, w2 = get_duration_neutral_butterfly(df_select, left_wing, belly, right_wing, method=metric)
     wtd_fly = get_wtd_butterfly(df_select, left_wing, belly, right_wing, left_weight=w1, right_weight=w2)
+    
+    # calculates various 
     fly_avg = wtd_fly.mean()
     resid = wtd_fly[-1] - fly_avg
     rlzd_vol = wtd_fly.diff().dropna().std()
     vol_adj_resid = resid / rlzd_vol
     my_range = wtd_fly.max() - wtd_fly.min()
-    my_title = 'residual: %.1fbp; vol adjusted residual: %.1fbp; range: %.1fbp' % (resid, vol_adj_resid, my_range)
+
+    # sets descriptive titles for the charts
+    my_title = 'hedging duration & curve gives us %.1f / 2 / %.1f fly' % (w1, w2)
+    my_xlabel = 'residual: %.1fbp; vol adjusted residual: %.1fbp; range: %.1fbp' % (resid, vol_adj_resid, my_range)
 
     fig = px.line(x=wtd_fly.index, y=wtd_fly, title=my_title)
     fly_name = '%.2f_2_%.2f %s_%s_%s fly' % (w1, w2, left_wing, belly, right_wing)
-    fig.update_layout(yaxis_title=fly_name, showlegend=False)
+    fig.update_layout(xaxis_title=my_xlabel, yaxis_title=fly_name, showlegend=False)
     fig.add_hline(y=wtd_fly.mean())
 
     return fig
